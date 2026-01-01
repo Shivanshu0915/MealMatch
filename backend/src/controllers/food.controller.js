@@ -1,6 +1,6 @@
-
 import mongoose from "mongoose";
 import { Food } from "../models/food.model.js";
+import { uploadOnCloudinary } from "../utils/cloudinary.js";
 
 // Create food
 export const createFood = async (req, res) => {
@@ -61,14 +61,45 @@ export const createFood = async (req, res) => {
   }
 
   const pickupDate = new Date(pickupTime);
+
   if (isNaN(pickupDate.getTime())) {
-    return res
-      .status(400)
-      .json({ success: false, message: "Invalid pickup time." });
+    return res.status(400).json({
+      success: false,
+      message: "Invalid pickup time.",
+    });
+  }
+
+  if (pickupDate < new Date()) {
+    return res.status(400).json({
+      success: false,
+      message: "Pickup time must be in the future",
+    });
   }
 
   //Pending for now file handlinggg usingg cloudinary and multer....
   let menuimageurl = "";
+  const menuImageLocalpath = req.files?.menuImage?.[0]?.path;
+  if (!menuImageLocalpath) {
+    return res.status(400).json({
+      success: false,
+      message: "Menu Image is required",
+    });
+  }
+  try {
+    const uploadedmenu = await uploadOnCloudinary(menuImageLocalpath);
+    if (!uploadedmenu || !uploadedmenu.url) {
+      return res.status(400).json({
+        success: false,
+        message: "Menu Image Uploading failed",
+      });
+    }
+    menuimageurl = uploadedmenu.url;
+  } catch (error) {
+    return res.status(500).json({
+      success: false,
+      message: "Cloudinary upload Failed",
+    });
+  }
 
   try {
     const food = await Food.create({
@@ -203,6 +234,25 @@ export const updateFood = async (req, res) => {
         message: "You can update only your own food posts.",
       });
     }
+    if (req.body.pickupTime !== undefined) {
+      const d = new Date(req.body.pickupTime);
+
+      if (isNaN(d.getTime())) {
+        return res.status(400).json({
+          success: false,
+          message: "Invalid pickup time.",
+        });
+      }
+
+      if (d < new Date()) {
+        return res.status(400).json({
+          success: false,
+          message: "Pickup time must be in the future",
+        });
+      }
+
+      food.pickupTime = d;
+    }
 
     const fields = [
       "title",
@@ -211,7 +261,6 @@ export const updateFood = async (req, res) => {
       "numServings",
       "quantity",
       "pickupLocation",
-      "pickupTime",
       "pickupInstructions",
       "contactEmail",
       "contactMobileNumber",
@@ -219,12 +268,7 @@ export const updateFood = async (req, res) => {
 
     fields.forEach((field) => {
       if (req.body[field] !== undefined) {
-        if (field === "pickupTime") {
-          const d = new Date(req.body[field]);
-          if (!isNaN(d.getTime())) {
-            food.pickupTime = d;
-          }
-        } else if (field === "numServings") {
+        if (field === "numServings") {
           const n = Number(req.body[field]);
           if (!Number.isNaN(n) && n > 0) {
             food.numServings = n;
@@ -236,7 +280,19 @@ export const updateFood = async (req, res) => {
     });
 
     // File handling for menuimageurl will addhere later
+    const menuImageLocalpath = req.files?.menuImage?.[0]?.path;
 
+    if (menuImageLocalpath) {
+      const uploadedMenu = await uploadOnCloudinary(menuImageLocalpath);
+
+      if (!uploadedMenu || !uploadedMenu.url) {
+        return res.status(400).json({
+          success: false,
+          message: "Menu image upload failed",
+        });
+      }
+      food.menuimageurl = uploadedMenu.url;
+    }
     const updated = await food.save();
 
     return res.status(200).json({
